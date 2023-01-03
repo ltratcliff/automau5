@@ -1,8 +1,8 @@
 [package]
-name = "auto_mouse"
+name = "automau5"
 version = "0.1.0"
 edition = "2021"
-author = "Tom R. <tom.ratcliff@sofcdo.com>"
+author = "Tom R. <ltratcliff@gmail.com>"
 description = "Move and Click with ease"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
