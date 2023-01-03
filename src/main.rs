@@ -12,29 +12,30 @@ struct Args {
     /// click or move
     action: String,
 
-    /// Number of seconds between moving
+    /// Number of seconds between moving or clicking
     #[arg(short, long, default_value_t = 5)]
     interval: u64,
 
-    /// Number of moves to run program
+    /// Number of iterations to run program
     #[arg(short, long, default_value_t = 60)]
-    duration: u16,
+    count: u16,
 }
 
 fn main() {
     let args = Args::parse();
+
     if args.action == "move" {
-        move_mouse(args.interval, args.duration)
+        move_mouse(args.interval, args.count)
     } else if args.action == "click" {
         // println!("Not implemented yet");
         // process::exit(1);
-        click_mouse(args.interval, args.duration)
+        click_mouse(args.interval, args.count)
     }
 
     //
 }
 
-fn move_mouse(interval: u64, duration: u16) {
+fn move_mouse(interval: u64, count: u16) {
     match TermLogger::init(
         LevelFilter::Info,
         Config::default(),
@@ -48,7 +49,7 @@ fn move_mouse(interval: u64, duration: u16) {
     let mut rng = rand::thread_rng();
     let mut enigo = Enigo::new();
     let mut n = 0;
-    while n < duration {
+    while n < count {
         let x: i32 = rng.gen_range(0..500);
         let y: i32 = rng.gen_range(0..500);
         info!("x: {} \t y: {}", x, y);
@@ -62,7 +63,7 @@ fn move_mouse(interval: u64, duration: u16) {
     }
 }
 
-fn click_mouse(interval: u64, duration: u16) {
+fn click_mouse(interval: u64, count: u16) {
     match TermLogger::init(
         LevelFilter::Info,
         Config::default(),
@@ -75,7 +76,7 @@ fn click_mouse(interval: u64, duration: u16) {
 
     let mut enigo = Enigo::new();
     let mut n = 0;
-    while n < duration {
+    while n < count {
         // let cursor_location: (i32, i32) = enigo.mouse_location();
         // info!("Clicked at x: {} \t y: {}", cursor_location.0, cursor_location.1);
         info!("Clicked!");
