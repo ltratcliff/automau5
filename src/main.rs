@@ -45,6 +45,10 @@ fn move_mouse(interval: u64, count: u16) {
         Err(e) => println!("{:?}", e),
         _ => (),
     };
+    info!(
+        "Moving cursor for: {} hours",
+        (interval as f32 * count as f32) / 3600.
+    );
 
     let mut rng = rand::thread_rng();
     let mut enigo = Enigo::new();
@@ -73,6 +77,10 @@ fn click_mouse(interval: u64, count: u16) {
         Err(e) => println!("{:?}", e),
         _ => (),
     };
+    info!(
+        "Clicking left mouse button for: {} hours",
+        (interval as f32 * count as f32) / 3600.
+    );
 
     let mut enigo = Enigo::new();
     let mut n = 0;
