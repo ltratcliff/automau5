@@ -16,6 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: Install XDO Dependency
+      run: apt-get install libxdo-dev
     - name: Build
       run: cargo build --verbose
     - name: Run tests
