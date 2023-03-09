@@ -18,11 +18,14 @@ jobs:
     - uses: actions/checkout@v3
     - name: Install XDO Dependency
       run: sudo apt-get install libxdo-dev
-    #- name: Build
-    #  run: cargo build --verbose
-    - name: Build sources
-      uses: actions-rs/cargo@v1
+    - name: Build Linux
+      run: cargo build --release
+    - name: Build Windows
+      run: cargo build --target x86_64-pc-windows-gnu --release
+    - uses: actions/upload-artifact@v3
       with:
-        command: build
-        args: --release
+        path: |
+          target/release/am
+          target/x86_64-pc-windows-gnu/release/am.exe
+
 
