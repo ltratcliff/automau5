@@ -18,6 +18,8 @@ jobs:
     - uses: actions/checkout@v3
     - name: Install XDO Dependency
       run: sudo apt-get install libxdo-dev
+    - name: Install windows rustc target
+      run: rustup target add x86_64-pc-windows-gnu
     - name: Build Linux
       run: cargo build --release
     - name: Build Windows
