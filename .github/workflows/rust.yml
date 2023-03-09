@@ -17,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Install XDO Dependency
-      run: sudo apt-get install libxdo-dev
+      run: sudo apt-get install libxdo-dev mingw-w64
     - name: Install windows rustc target
       run: rustup target add x86_64-pc-windows-gnu
     - name: Build Linux
