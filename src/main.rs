@@ -13,7 +13,7 @@ struct Args {
     action: String,
 
     /// Number of seconds between moving or clicking
-    #[arg(short, long, default_value_t = 5)]
+    #[arg(short, long, default_value_t = 60)]
     interval: u64,
 
     /// Number of iterations to run program
