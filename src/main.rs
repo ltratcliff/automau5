@@ -27,12 +27,8 @@ fn main() {
     if args.action == "move" {
         move_mouse(args.interval, args.count)
     } else if args.action == "click" {
-        // println!("Not implemented yet");
-        // process::exit(1);
         click_mouse(args.interval, args.count)
     }
-
-    //
 }
 
 fn move_mouse(interval: u64, count: u16) {
