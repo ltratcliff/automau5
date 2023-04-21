@@ -27,23 +27,18 @@ fn main() {
     if args.action == "move" {
         move_mouse(args.interval, args.count)
     } else if args.action == "click" {
-        // println!("Not implemented yet");
-        // process::exit(1);
         click_mouse(args.interval, args.count)
     }
-
-    //
 }
 
 fn move_mouse(interval: u64, count: u16) {
-    match TermLogger::init(
+    if let Err(e) = TermLogger::init(
         LevelFilter::Info,
         Config::default(),
         TerminalMode::Mixed,
         ColorChoice::Auto,
     ) {
-        Err(e) => println!("{:?}", e),
-        _ => (),
+        println!("{:?}", e)
     };
     info!(
         "Moving cursor for: {} hours",
@@ -57,9 +52,8 @@ fn move_mouse(interval: u64, count: u16) {
         let x: i32 = rng.gen_range(0..500);
         let y: i32 = rng.gen_range(0..500);
         info!("x: {} \t y: {}", x, y);
-        match io::stdout().flush() {
-            Err(e) => println!("{:?}", e),
-            _ => (),
+        if let Err(e) = io::stdout().flush() {
+            println!("{:?}", e)
         }
         enigo.mouse_move_to(x, y);
         thread::sleep(time::Duration::from_secs(interval));
@@ -68,14 +62,13 @@ fn move_mouse(interval: u64, count: u16) {
 }
 
 fn click_mouse(interval: u64, count: u16) {
-    match TermLogger::init(
+    if let Err(e) = TermLogger::init(
         LevelFilter::Info,
         Config::default(),
         TerminalMode::Mixed,
         ColorChoice::Auto,
     ) {
-        Err(e) => println!("{:?}", e),
-        _ => (),
+        println!("{:?}", e)
     };
     info!(
         "Clicking left mouse button for: {} hours",
@@ -88,9 +81,8 @@ fn click_mouse(interval: u64, count: u16) {
         // let cursor_location: (i32, i32) = enigo.mouse_location();
         // info!("Clicked at x: {} \t y: {}", cursor_location.0, cursor_location.1);
         info!("Clicked!");
-        match io::stdout().flush() {
-            Err(e) => println!("{:?}", e),
-            _ => (),
+        if let Err(e) = io::stdout().flush() {
+            println!("{:?}", e)
         }
         enigo.mouse_click(MouseButton::Left);
         thread::sleep(time::Duration::from_secs(interval));
