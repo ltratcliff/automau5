@@ -1,11 +1,10 @@
 use clap::Parser;
 use enigo::{Button, Coordinate, Direction::{Click, Press, Release}, Enigo, Key, Keyboard, Mouse, Settings};
-use log::info;
+use log::{info, error};
 use rand::prelude::*;
 use simplelog::*;
 use std::io::Write;
 use std::{io, thread, time};
-use rand::distr::Alphanumeric;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -114,12 +113,14 @@ fn type_stuff(interval: u64, count: u16){
     while n < count {
         // let cursor_location: (i32, i32) = enigo.mouse_location();
         // info!("Clicked at x: {} \t y: {}", cursor_location.0, cursor_location.1);
-        info!("Typed!");
         if let Err(e) = io::stdout().flush() {
             println!("{:?}", e)
         }
-        let random_char = rng.sample(Alphanumeric);
-        enigo.key(Key::Unicode(char::from(random_char)), Click).expect("TODO: panic message");
+        let random_char = rng.gen_range(b'a'..=b'z') as char;
+        match enigo.key(Key::Unicode(random_char), Click) {
+            Ok(_) => info!("Typed!"),
+            Err(e) => error!("Error: {}", e)
+        }
         thread::sleep(time::Duration::from_secs(interval));
         n += 1;
     }
