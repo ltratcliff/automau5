@@ -1,15 +1,16 @@
 use clap::Parser;
-use enigo::*;
+use enigo::{Button, Coordinate, Direction::{Click, Press, Release}, Enigo, Key, Keyboard, Mouse, Settings};
 use log::info;
 use rand::prelude::*;
 use simplelog::*;
 use std::io::Write;
 use std::{io, thread, time};
+use rand::distr::Alphanumeric;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// click or move
+    /// click or move or type
     action: String,
 
     /// Number of seconds between moving or clicking
@@ -28,6 +29,8 @@ fn main() {
         move_mouse(args.interval, args.count)
     } else if args.action == "click" {
         click_mouse(args.interval, args.count)
+    } else if args.action == "type" {
+        type_stuff(args.interval, args.count)
     }
 }
 
@@ -46,7 +49,7 @@ fn move_mouse(interval: u64, count: u16) {
     );
 
     let mut rng = rand::thread_rng();
-    let mut enigo = Enigo::new();
+    let mut enigo = Enigo::new(&Settings::default()).unwrap();
     let mut n = 0;
     while n < count {
         let x: i32 = rng.gen_range(0..500);
@@ -55,7 +58,7 @@ fn move_mouse(interval: u64, count: u16) {
         if let Err(e) = io::stdout().flush() {
             println!("{:?}", e)
         }
-        enigo.mouse_move_to(x, y);
+        enigo.move_mouse(x, y, Coordinate::Rel).expect("TODO: panic message");
         thread::sleep(time::Duration::from_secs(interval));
         n += 1;
     }
@@ -75,7 +78,7 @@ fn click_mouse(interval: u64, count: u16) {
         (interval as f32 * count as f32) / 3600.
     );
 
-    let mut enigo = Enigo::new();
+    let mut enigo = Enigo::new(&Settings::default()).unwrap();
     let mut n = 0;
     while n < count {
         // let cursor_location: (i32, i32) = enigo.mouse_location();
@@ -84,7 +87,39 @@ fn click_mouse(interval: u64, count: u16) {
         if let Err(e) = io::stdout().flush() {
             println!("{:?}", e)
         }
-        enigo.mouse_click(MouseButton::Left);
+        enigo.button(Button::Left, Press).expect("TODO: panic message");
+        enigo.button(Button::Left, Release).expect("TODO: panic message");
+        thread::sleep(time::Duration::from_secs(interval));
+        n += 1;
+    }
+}
+
+fn type_stuff(interval: u64, count: u16){
+    if let Err(e) = TermLogger::init(
+        LevelFilter::Info,
+        Config::default(),
+        TerminalMode::Mixed,
+        ColorChoice::Auto,
+    ) {
+        println!("{:?}", e)
+    };
+    info!(
+        "Typing for: {} hours",
+        (interval as f32 * count as f32) / 3600.
+    );
+
+    let mut enigo = Enigo::new(&Settings::default()).unwrap();
+    let mut n = 0;
+    let mut rng = rand::thread_rng();
+    while n < count {
+        // let cursor_location: (i32, i32) = enigo.mouse_location();
+        // info!("Clicked at x: {} \t y: {}", cursor_location.0, cursor_location.1);
+        info!("Typed!");
+        if let Err(e) = io::stdout().flush() {
+            println!("{:?}", e)
+        }
+        let random_char = rng.sample(Alphanumeric);
+        enigo.key(Key::Unicode(char::from(random_char)), Click).expect("TODO: panic message");
         thread::sleep(time::Duration::from_secs(interval));
         n += 1;
     }
