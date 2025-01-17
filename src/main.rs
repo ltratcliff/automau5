@@ -55,12 +55,12 @@ fn move_mouse(interval: u64, count: u16) {
         (interval as f32 * count as f32) / 3600.
     );
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut enigo = Enigo::new(&Settings::default()).unwrap();
     let mut n = 0;
     while n < count {
-        let x: i32 = rng.gen_range(0..500);
-        let y: i32 = rng.gen_range(0..500);
+        let x: i32 = rng.random_range(0..500);
+        let y: i32 = rng.random_range(0..500);
         info!("x: {} \t y: {}", x, y);
         if let Err(e) = io::stdout().flush() {
             println!("{:?}", e)
@@ -119,14 +119,14 @@ fn type_stuff(interval: u64, count: u16){
 
     let mut enigo = Enigo::new(&Settings::default()).unwrap();
     let mut n = 0;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     while n < count {
         // let cursor_location: (i32, i32) = enigo.mouse_location();
         // info!("Clicked at x: {} \t y: {}", cursor_location.0, cursor_location.1);
         if let Err(e) = io::stdout().flush() {
             println!("{:?}", e)
         }
-        let random_char = rng.gen_range(b'a'..=b'z') as char;
+        let random_char = rng.random_range(b'a'..=b'z') as char;
         match enigo.key(Key::Unicode(random_char), Click) {
             Ok(_) => info!("Typed!"),
             Err(e) => error!("Error: {}", e)
