@@ -6,6 +6,14 @@ use simplelog::*;
 use std::io::Write;
 use std::{io, thread, time};
 
+const ENDOFAUTO: &str = r#"
+
+############################################
+Automated mouse typing and clicking complete
+Thank you for using this program!
+############################################
+"#;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -61,6 +69,7 @@ fn move_mouse(interval: u64, count: u16) {
         thread::sleep(time::Duration::from_secs(interval));
         n += 1;
     }
+    println!("{}", ENDOFAUTO);
 }
 
 fn click_mouse(interval: u64, count: u16) {
@@ -91,6 +100,7 @@ fn click_mouse(interval: u64, count: u16) {
         thread::sleep(time::Duration::from_secs(interval));
         n += 1;
     }
+    println!("{}", ENDOFAUTO);
 }
 
 fn type_stuff(interval: u64, count: u16){
@@ -124,4 +134,5 @@ fn type_stuff(interval: u64, count: u16){
         thread::sleep(time::Duration::from_secs(interval));
         n += 1;
     }
+    println!("{}", ENDOFAUTO);
 }
