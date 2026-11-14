@@ -11,25 +11,28 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
-    - name: Install Windows cross linker
-      run: sudo apt-get install -y mingw-w64 libxkbcommon-dev
-    - name: Install windows rustc target
-      run: rustup target add x86_64-pc-windows-gnu
+    - uses: actions/checkout@v4
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mingw-w64 libxkbcommon-dev
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: x86_64-pc-windows-gnu
+    - uses: swatinem/rust-cache@v2
     - name: Test
       run: cargo test --features serde
     - name: Build Linux
       run: cargo build --release
     - name: Build Windows
       run: cargo build --target x86_64-pc-windows-gnu --release
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
+        name: am-cli
         path: |
           target/release/am
           target/x86_64-pc-windows-gnu/release/am.exe
-
-
+        if-no-files-found: error
