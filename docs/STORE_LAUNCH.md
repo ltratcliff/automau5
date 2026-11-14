@@ -53,8 +53,16 @@ The page is [`docs/privacy.html`](privacy.html). Host it with GitHub Pages:
 
 ## Housekeeping
 
-- [ ] Delete the merged branch: `git push origin --delete desktop-app && git branch -d desktop-app`.
-- [ ] Delete the empty `package-lock.json` in the repo root.
+- [x] Delete the merged branch: `git push origin --delete desktop-app && git branch -d desktop-app`.
+- [x] Delete the empty `package-lock.json` in the repo root.
+
+## Signed macOS DMG (outside the App Store)
+
+The `macOS (signed + notarized)` workflow is ready. It needs:
+
+- [ ] Apple Developer Program membership ($99/yr).
+- [ ] The five `APPLE_*` repository secrets. Setup steps are in [`app/README.md`](../app/README.md#signed-macos-builds-developer-id).
+- [ ] A test run (Actions → **macOS (signed + notarized)** → **Run workflow**). Then download the DMG and open it on a Mac with no Gatekeeper warning.
 
 ## After Windows: Mac App Store
 

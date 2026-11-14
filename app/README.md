@@ -36,6 +36,35 @@ Replace `icons/` by putting a 1024×1024 PNG at `src-tauri/app-icon.png` and run
 
 Before submitting to either store, change `identifier` in `tauri.conf.json` (currently the placeholder `com.automau5.app`) to a reverse-DNS id you own. It can't be changed after the first store submission.
 
+## Signed macOS builds (Developer ID)
+
+For distributing outside the App Store (website, GitHub releases). The [`macOS (signed + notarized)` workflow](../.github/workflows/macos-signed.yml) builds a universal DMG signed with your Developer ID and notarized by Apple, so it opens without Gatekeeper warnings. Run it from the Actions tab or push a `v*` tag; the DMG is in the run's artifacts as `automau5-macos-universal-dmg`.
+
+It needs an Apple Developer Program membership and five repository secrets (Settings → Secrets and variables → Actions → **Secrets**):
+
+| Secret | What it is |
+|---|---|
+| `APPLE_CERTIFICATE` | Your Developer ID Application certificate and private key, exported as `.p12` and base64-encoded |
+| `APPLE_CERTIFICATE_PASSWORD` | The password you set when exporting the `.p12` |
+| `APPLE_API_ISSUER` | App Store Connect API issuer ID |
+| `APPLE_API_KEY` | App Store Connect API key ID |
+| `APPLE_API_KEY_P8` | Full contents of the downloaded `AuthKey_<KEYID>.p8` file |
+
+**Certificate** (needs a Mac, done once):
+1. In [Certificates, IDs & Profiles](https://developer.apple.com/account/resources/certificates/list), create a **Developer ID Application** certificate. Only the account holder can create one. Follow the prompts to upload a certificate signing request from Keychain Access, then download the certificate and double-click it to install.
+2. In Keychain Access → login → **My Certificates**, right-click "Developer ID Application: …" → **Export** → save as `.p12` with a password.
+3. Base64-encode it and paste the output into `APPLE_CERTIFICATE`:
+   ```sh
+   openssl base64 -A -in Certificates.p12 | pbcopy
+   ```
+
+**Notarization key:**
+1. In [App Store Connect → Users and Access → Integrations → App Store Connect API](https://appstoreconnect.apple.com/access/integrations/api), generate a **Team Key** with the **Developer** role.
+2. Copy the **Issuer ID** (above the table) into `APPLE_API_ISSUER` and the key's **Key ID** into `APPLE_API_KEY`.
+3. Download the key (`AuthKey_<KEYID>.p8`, you can only download it once) and paste its full contents, including the `BEGIN`/`END` lines, into `APPLE_API_KEY_P8`.
+
+The workflow imports the certificate into a temporary keychain, lets `tauri build` sign the app (hardened runtime) and notarize it, then also notarizes and staples the DMG. Before uploading, it checks the result with `codesign`, `spctl` (Gatekeeper) and `stapler`. A run with missing secrets fails at the first step and names the missing ones.
+
 ## Mac App Store
 
 1. Apple Developer Program membership. In App Store Connect, register the bundle id and create the app.

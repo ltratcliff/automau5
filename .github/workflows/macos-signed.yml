@@ -1,0 +1,154 @@
+name: macOS (signed + notarized)
+
+# Builds a universal (Apple Silicon + Intel) DMG signed with a Developer ID
+# Application certificate and notarized by Apple, so it opens without
+# Gatekeeper warnings when distributed outside the App Store.
+# Run it by hand from the Actions tab, or push a tag like v0.2.0.
+#
+# Repository secrets (Settings > Secrets and variables > Actions > Secrets);
+# app/README.md explains how to get each one:
+#   APPLE_CERTIFICATE           base64 of the exported Developer ID Application .p12
+#   APPLE_CERTIFICATE_PASSWORD  password chosen when exporting the .p12
+#   APPLE_API_ISSUER            App Store Connect API issuer ID
+#   APPLE_API_KEY               App Store Connect API key ID
+#   APPLE_API_KEY_P8            contents of the downloaded AuthKey_<id>.p8
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+
+    steps:
+      - name: Check secrets
+        run: |
+          missing=""
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing (see app/README.md, 'Signed macOS builds')"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Import signing certificate
+        run: |
+          # Throwaway keychain with a random password, deleted at the end of the job.
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # Put it on the search list (keeping the existing ones) so codesign finds it.
+          existing=()
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"  # trim leading spaces
+            existing+=("${line//\"/}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$KEYCHAIN" "${existing[@]}"
+          rm "$RUNNER_TEMP/certificate.p12"
+
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No 'Developer ID Application' identity in APPLE_CERTIFICATE. Found:"
+            security find-identity -v -p codesigning "$KEYCHAIN"
+            exit 1
+          fi
+          echo "Signing as: $IDENTITY"
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Write notarization key
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Check tag matches app version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match tauri.conf.json version $version"
+            exit 1
+          fi
+
+      # Tauri signs (with hardened runtime), notarizes and staples when the
+      # APPLE_* variables above are set. Notarization usually takes a few minutes.
+      - name: Build, sign and notarize
+        working-directory: app
+        run: npm run tauri build -- --target universal-apple-darwin --bundles dmg
+
+      # Tauri notarizes the .app; Apple recommends notarizing the outermost
+      # container too, so sign, notarize and staple the DMG explicitly.
+      - name: Sign, notarize and staple the DMG
+        run: |
+          BUNDLE=target/universal-apple-darwin/release/bundle
+          APP=$(find "$BUNDLE/macos" -maxdepth 1 -name '*.app' | head -1)
+          DMG=$(find "$BUNDLE/dmg" -maxdepth 1 -name '*.dmg' | head -1)
+          [ -n "$APP" ] && [ -n "$DMG" ] || { echo "::error::Build produced no .app or .dmg"; exit 1; }
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+          echo "DMG_PATH=$DMG" >> "$GITHUB_ENV"
+          codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"
+          xcrun notarytool submit "$DMG" --wait \
+            --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER"
+          xcrun stapler staple "$DMG"
+
+      - name: Verify signature and notarization
+        run: |
+          APP="$APP_PATH"; DMG="$DMG_PATH"
+          echo "App: $APP"; echo "DMG: $DMG"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          info=$(codesign -dv --verbose=2 "$APP" 2>&1)
+          echo "$info" | grep 'Authority=Developer ID Application'
+          echo "$info" | grep -E 'flags=.*runtime' || { echo "::error::Hardened runtime not enabled"; exit 1; }
+          spctl --assess --type execute --verbose=2 "$APP"
+          xcrun stapler validate "$APP"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: automau5-macos-universal-dmg
+          path: ${{ env.DMG_PATH }}
+          if-no-files-found: error
+
+      - name: Clean up keychain and key
+        if: always()
+        run: |
+          [ -n "$KEYCHAIN" ] && security delete-keychain "$KEYCHAIN" || true
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
