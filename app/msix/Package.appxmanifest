@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest for the Microsoft Store build (.github/workflows/msix.yml).
+
+  CI overwrites Identity Name/Publisher/Version/ProcessorArchitecture and
+  PublisherDisplayName, so the placeholders below only matter for local
+  `winapp pack` runs. For Store uploads, set the repository variables
+  MSIX_IDENTITY_NAME, MSIX_PUBLISHER and MSIX_PUBLISHER_DISPLAY_NAME to the
+  values in Partner Center > your app > Product identity.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <Identity
+    Name="Automau5.Dev"
+    Publisher="CN=Automau5 Dev"
+    Version="0.1.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Automau5</DisplayName>
+    <PublisherDisplayName>Automau5 Dev</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!-- Windows 10 1809+. The app also needs the WebView2 runtime, which ships with Windows 11 and nearly all Windows 10 installs. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Automau5" Executable="automau5-app.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Automau5"
+        Description="Move, click, type, or keep your PC awake on a timer."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- Regular desktop (Win32) app: needed to inject input and use power APIs. -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

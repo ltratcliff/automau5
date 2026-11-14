@@ -1,0 +1,3 @@
+/gen/schemas
+# Apple provisioning profile for App Store builds (download from developer.apple.com)
+*.provisionprofile

@@ -1,0 +1,14 @@
+[package]
+name = "automau5-app"
+version = "0.1.0"
+edition = "2021"
+description = "Desktop GUI for automau5"
+license = "MIT"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+automau5 = { path = "../..", default-features = false, features = ["serde"] }
+tauri = { version = "2", features = [] }

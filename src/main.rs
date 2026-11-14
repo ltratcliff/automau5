@@ -1,10 +1,8 @@
+use automau5::{run_job, Action, Actor, Event, JobConfig, KeyCombo, DEFAULT_HOLD_MS};
 use clap::Parser;
-use enigo::{Button, Coordinate, Direction::{Click, Press, Release}, Enigo, Key, Keyboard, Mouse, Settings};
-use log::{info, error};
-use rand::prelude::*;
-use simplelog::*;
-use std::io::Write;
-use std::{io, thread, time};
+use std::process::ExitCode;
+use std::sync::mpsc;
+use std::time::Instant;
 
 const ENDOFAUTO: &str = r#"
 
@@ -17,122 +15,120 @@ Thank you for using this program!
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// click or move or type
-    action: String,
+    /// What to do on each iteration
+    #[arg(value_enum)]
+    action: Action,
 
     /// Number of seconds between moving or clicking
     #[arg(short, long, default_value_t = 60)]
     interval: u64,
 
     /// Number of iterations to run program
-    #[arg(short, long, default_value_t = 60)]
-    count: u16,
+    #[arg(short, long, default_value_t = 60, conflicts_with = "forever")]
+    count: u32,
+
+    /// Run until interrupted with Ctrl-C instead of a fixed count
+    #[arg(short, long)]
+    forever: bool,
+
+    /// keep-awake only: also keep the display from turning off
+    #[arg(short, long)]
+    display: bool,
+
+    /// type only: press this key or combo instead of a random letter, e.g.
+    /// `space`, `f5`, `ctrl+shift+a`. Repeat to pick one at random each time.
+    #[arg(short, long = "key", value_name = "COMBO")]
+    keys: Vec<KeyCombo>,
+
+    /// type --key only: milliseconds to hold the combo down
+    #[arg(long, value_name = "MS", default_value_t = DEFAULT_HOLD_MS)]
+    hold: u64,
 }
 
-fn main() {
+/// Prints `[h:mm:ss] message`, timed from the start of the run.
+fn log(start: Instant, msg: impl std::fmt::Display) {
+    let s = start.elapsed().as_secs();
+    println!("[{}:{:02}:{:02}] {msg}", s / 3600, s / 60 % 60, s % 60);
+}
+
+fn main() -> ExitCode {
     let args = Args::parse();
+    let start = Instant::now();
 
-    if args.action == "move" {
-        move_mouse(args.interval, args.count)
-    } else if args.action == "click" {
-        click_mouse(args.interval, args.count)
-    } else if args.action == "type" {
-        type_stuff(args.interval, args.count)
-    }
-}
-
-fn move_mouse(interval: u64, count: u16) {
-    if let Err(e) = TermLogger::init(
-        LevelFilter::Info,
-        Config::default(),
-        TerminalMode::Mixed,
-        ColorChoice::Auto,
-    ) {
-        println!("{:?}", e)
+    let config = JobConfig {
+        action: args.action,
+        interval_secs: args.interval,
+        count: (!args.forever).then_some(args.count),
+        keep_display_on: args.display,
+        keys: args.keys,
+        hold_ms: args.hold,
     };
-    info!(
-        "Moving cursor for: {} hours",
-        (interval as f32 * count as f32) / 3600.
-    );
-
-    let mut rng = rand::rng();
-    let mut enigo = Enigo::new(&Settings::default()).unwrap();
-    let mut n = 0;
-    while n < count {
-        let x: i32 = rng.random_range(0..500);
-        let y: i32 = rng.random_range(0..500);
-        info!("x: {} \t y: {}", x, y);
-        if let Err(e) = io::stdout().flush() {
-            println!("{:?}", e)
-        }
-        enigo.move_mouse(x, y, Coordinate::Rel).expect("TODO: panic message");
-        thread::sleep(time::Duration::from_secs(interval));
-        n += 1;
+    if let Err(e) = config.validate() {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
     }
-    println!("{}", ENDOFAUTO);
-}
 
-fn click_mouse(interval: u64, count: u16) {
-    if let Err(e) = TermLogger::init(
-        LevelFilter::Info,
-        Config::default(),
-        TerminalMode::Mixed,
-        ColorChoice::Auto,
-    ) {
-        println!("{:?}", e)
+    // keep-awake doesn't touch input devices, so don't ask for access.
+    let mut actor = if config.action.needs_input_access() {
+        match Actor::new() {
+            Ok(actor) => Some(actor),
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
     };
-    info!(
-        "Clicking left mouse button for: {} hours",
-        (interval as f32 * count as f32) / 3600.
-    );
 
-    let mut enigo = Enigo::new(&Settings::default()).unwrap();
-    let mut n = 0;
-    while n < count {
-        // let cursor_location: (i32, i32) = enigo.mouse_location();
-        // info!("Clicked at x: {} \t y: {}", cursor_location.0, cursor_location.1);
-        info!("Clicked!");
-        if let Err(e) = io::stdout().flush() {
-            println!("{:?}", e)
-        }
-        enigo.button(Button::Left, Press).expect("TODO: panic message");
-        enigo.button(Button::Left, Release).expect("TODO: panic message");
-        thread::sleep(time::Duration::from_secs(interval));
-        n += 1;
+    match config.total_duration() {
+        Some(total) => log(
+            start,
+            format_args!(
+                "Running '{}' every {}s, {} times ({:.2} hours)",
+                config.action,
+                config.interval_secs,
+                config.count.unwrap_or_default(),
+                total.as_secs_f32() / 3600.
+            ),
+        ),
+        None => log(
+            start,
+            format_args!("Running '{}' every {}s until Ctrl-C", config.action, config.interval_secs),
+        ),
     }
-    println!("{}", ENDOFAUTO);
-}
 
-fn type_stuff(interval: u64, count: u16){
-    if let Err(e) = TermLogger::init(
-        LevelFilter::Info,
-        Config::default(),
-        TerminalMode::Mixed,
-        ColorChoice::Auto,
-    ) {
-        println!("{:?}", e)
-    };
-    info!(
-        "Typing for: {} hours",
-        (interval as f32 * count as f32) / 3600.
+    // Never signalled: the CLI runs until done or Ctrl-C.
+    let (_stop_tx, stop_rx) = mpsc::channel();
+    let result = run_job(
+        &config,
+        &stop_rx,
+        |input| match actor.as_mut() {
+            Some(actor) => actor.apply(&input),
+            None => unreachable!("run_job only calls perform for input actions"),
+        },
+        |event| {
+            let (iteration, count, msg) = match &event {
+                Event::Performed { iteration, count, detail } => (iteration, count, detail),
+                Event::Failed { iteration, count, error } => (iteration, count, error),
+                _ => return,
+            };
+            let progress = match count {
+                Some(count) => format!("{iteration}/{count}"),
+                None => iteration.to_string(),
+            };
+            if matches!(event, Event::Failed { .. }) {
+                eprintln!("error: [{progress}] {msg}");
+            } else {
+                log(start, format_args!("[{progress}] {msg}"));
+            }
+        },
     );
-
-    let mut enigo = Enigo::new(&Settings::default()).unwrap();
-    let mut n = 0;
-    let mut rng = rand::rng();
-    while n < count {
-        // let cursor_location: (i32, i32) = enigo.mouse_location();
-        // info!("Clicked at x: {} \t y: {}", cursor_location.0, cursor_location.1);
-        if let Err(e) = io::stdout().flush() {
-            println!("{:?}", e)
-        }
-        let random_char = rng.random_range(b'a'..=b'z') as char;
-        match enigo.key(Key::Unicode(random_char), Click) {
-            Ok(_) => info!("Typed!"),
-            Err(e) => error!("Error: {}", e)
-        }
-        thread::sleep(time::Duration::from_secs(interval));
-        n += 1;
+    if let Err(e) = result {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
     }
-    println!("{}", ENDOFAUTO);
+
+    println!("{ENDOFAUTO}");
+    ExitCode::SUCCESS
 }

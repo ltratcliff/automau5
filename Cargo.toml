@@ -1,19 +1,51 @@
+[workspace]
+members = ["app/src-tauri"]
+
 [package]
 name = "automau5"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.82"
 description = "Move and Click with ease"
 license = "MIT"
+
+[lib]
+name = "automau5"
+path = "src/lib.rs"
 
 [[bin]]
 name = "am"
 path = "src/main.rs"
+required-features = ["cli"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["cli"]
+cli = ["dep:clap"]
+serde = ["dep:serde"]
 
 [dependencies]
-clap = { version = "4.5.26", features = ["derive"] }
-enigo = "0.3.0"
-log = "0.4.25"
-rand = "0.9.0-beta.3"
-simplelog = "0.12.2"
+# Linux: Wayland (wlroots virtual pointer/keyboard: Hyprland, Sway, KDE) is
+# tried first, then X11. Both are pure Rust. Features are no-ops elsewhere.
+enigo = { version = "0.6", features = ["wayland", "x11rb"] }
+fastrand = "2"
+clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Power"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString"] }
+objc2-io-kit = { version = "0.3", default-features = false, features = ["std", "libc", "pwr_mgt"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+# Small, self-contained release binaries. Runtime speed isn't a concern: the
+# app spends nearly all its time asleep.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

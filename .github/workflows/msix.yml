@@ -1,0 +1,110 @@
+name: MSIX (Microsoft Store)
+
+# Builds unsigned MSIX packages for Partner Center; the Store signs them.
+# Run it by hand from the Actions tab, or push a tag like v0.2.0.
+#
+# Repository variables (Settings > Secrets and variables > Actions > Variables),
+# from Partner Center > your app > Product identity:
+#   MSIX_IDENTITY_NAME           e.g. 12345YourName.Automau5
+#   MSIX_PUBLISHER               e.g. CN=ABCD1234-5678-...
+#   MSIX_PUBLISHER_DISPLAY_NAME  e.g. Your Name
+# Without them the packages build with placeholder identity: fine for
+# checking the pipeline, but Partner Center will reject the upload.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  msix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+    runs-on: windows-latest
+    env:
+      MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME || 'Automau5.Dev' }}
+      MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER || 'CN=Automau5 Dev' }}
+      MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME || 'Automau5 Dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build app (exe only, no installers)
+        working-directory: app
+        run: npm run tauri build -- --no-bundle --target ${{ matrix.target }}
+
+      - uses: microsoft/setup-WinAppCli@v0.3
+
+      - name: Stage package files
+        shell: pwsh
+        run: |
+          $version = (Get-Content app/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "tauri.conf.json version '$version' must be MAJOR.MINOR.PATCH"
+          }
+          # The Store reserves the fourth part of the version; it must be 0.
+          $msixVersion = "$version.0"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME doesn't match tauri.conf.json version $version"
+          }
+
+          # Package contents: just the exe and its logos (target/ is mostly build intermediates).
+          New-Item -ItemType Directory -Force msix-stage, msix-manifest | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/automau5-app.exe" msix-stage/
+          Copy-Item -Recurse app/msix/Assets msix-stage/Assets
+          Copy-Item -Recurse app/msix/Assets msix-manifest/Assets
+
+          # Fill in identity, version and architecture. The manifest lives
+          # outside the package folder so the template isn't packaged too.
+          [xml]$manifest = Get-Content app/msix/Package.appxmanifest
+          $identity = $manifest.Package.Identity
+          $identity.Name = $env:MSIX_IDENTITY_NAME
+          $identity.Publisher = $env:MSIX_PUBLISHER
+          $identity.Version = $msixVersion
+          $identity.ProcessorArchitecture = '${{ matrix.arch }}'
+          $manifest.Package.Properties['PublisherDisplayName'].InnerText = $env:MSIX_PUBLISHER_DISPLAY_NAME
+          $manifest.Save((Join-Path $PWD 'msix-manifest/Package.appxmanifest'))
+
+          "MSIX_FILE=Automau5_${msixVersion}_${{ matrix.arch }}.msix" >> $env:GITHUB_ENV
+          if (-not $env:MSIX_PUBLISHER.StartsWith('CN=') -or $env:MSIX_IDENTITY_NAME -eq 'Automau5.Dev') {
+            "::warning::Using placeholder or unusual identity ($env:MSIX_IDENTITY_NAME / $env:MSIX_PUBLISHER). Set the MSIX_* repository variables before uploading to Partner Center."
+          }
+
+      - name: Pack MSIX (unsigned, for Store submission)
+        shell: pwsh
+        run: >
+          winapp pack msix-stage
+          --manifest msix-manifest/Package.appxmanifest
+          --executable automau5-app.exe
+          --no-sign
+          --output $env:MSIX_FILE
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: automau5-msix-${{ matrix.arch }}
+          path: ${{ env.MSIX_FILE }}
+          if-no-files-found: error
