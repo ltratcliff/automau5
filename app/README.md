@@ -32,7 +32,7 @@ On NixOS, run `nix-shell` in the repo root first; [`shell.nix`](../shell.nix) pr
 npm run tauri build            # installers for the current OS
 ```
 
-Replace `icons/` by putting a 1024×1024 PNG at `src-tauri/app-icon.png` and running `npx tauri icon src-tauri/app-icon.png -o src-tauri/icons`.
+The icon source is `src-tauri/app-icon.svg`. After editing it, regenerate every size: `rsvg-convert -w 1024 -h 1024 src-tauri/app-icon.svg -o src-tauri/app-icon.png && npx tauri icon src-tauri/app-icon.png -o src-tauri/icons`, then copy the three Store logos into `msix/Assets/`.
 
 Before submitting to either store, change `identifier` in `tauri.conf.json` (currently the placeholder `com.automau5.app`) to a reverse-DNS id you own. It can't be changed after the first store submission.
 
@@ -67,26 +67,54 @@ The workflow imports the certificate into a temporary keychain, lets `tauri buil
 
 ## Mac App Store
 
-1. Apple Developer Program membership. In App Store Connect, register the bundle id and create the app.
-2. Create a **Mac App Store** provisioning profile for that id and save it as `src-tauri/embedded.provisionprofile` (gitignored).
-3. In `Entitlements.plist`, replace `TEAM_ID` and make the bundle id match `identifier`.
-4. Build a universal, sandboxed app and wrap it in a signed installer package:
+The [`Mac App Store` workflow](../.github/workflows/mac-app-store.yml) builds a sandboxed, universal app signed for the App Store and wraps it in a signed `.pkg`. App Store builds aren't notarized; Apple reviews them instead.
 
-   ```sh
-   rustup target add aarch64-apple-darwin x86_64-apple-darwin
-   npm run tauri build -- --bundles app --target universal-apple-darwin \
-     --config src-tauri/tauri.appstore.conf.json
-   xcrun productbuild --sign "3rd Party Mac Developer Installer: <Your Name> (<TEAM_ID>)" \
-     --component "../target/universal-apple-darwin/release/bundle/macos/Automau5.app" /Applications \
-     Automau5.pkg
-   xcrun altool --upload-app --type macos --file Automau5.pkg --apiKey <KEY_ID> --apiIssuer <ISSUER_ID>
-   ```
+- **Tag pushes (`v*`)** build the `.pkg` as the `automau5-mac-app-store-pkg` artifact only.
+- **Manual runs** (Actions → **Mac App Store** → **Run workflow**) can also upload it to App Store Connect if you tick **upload**. Uploads then show up under **TestFlight** after processing.
 
-   Set `APPLE_SIGNING_IDENTITY="3rd Party Mac Developer Application: …"` (or `"Apple Distribution: …"`) for the build step. See <https://v2.tauri.app/distribute/app-store/>.
+Each run uses its run number as the build number (`CFBundleVersion`), so every upload is unique. The version shown to users (`CFBundleShortVersionString`) comes from `version` in `tauri.conf.json`.
 
-**Keep awake** mode uses IOKit power assertions, which work inside the App Sandbox and need no permission. If App Review objects to the input-generating modes, you can ship with only keep awake.
+### One-time setup
 
-For Move/Click/Type, users have to grant **Accessibility** permission (System Settings → Privacy & Security → Accessibility) before the app can generate input. The app triggers the system prompt the first time Start is pressed and shows a hint if permission is missing.
+**1. Bundle id and app record**
+1. Pick the final `identifier` in `src-tauri/tauri.conf.json` (it can't change after the first submission).
+2. In [Certificates, IDs & Profiles → Identifiers](https://developer.apple.com/account/resources/identifiers/list), register an explicit App ID with that bundle id. Platform: macOS.
+3. In [App Store Connect](https://appstoreconnect.apple.com/apps), create a new macOS app with that bundle id. Its numeric **Apple ID** (App Information page) goes in the `APPLE_APP_ID` variable.
+
+**2. Certificates** (on a Mac). Create both in [Certificates](https://developer.apple.com/account/resources/certificates/list) and install them:
+- **Apple Distribution** (or the older **Mac App Distribution**) for signing the app.
+- **Mac Installer Distribution** for signing the `.pkg`. Its identity is named "3rd Party Mac Developer Installer: …".
+
+Then in Keychain Access → login → **My Certificates**, select **both** entries, right-click → **Export 2 items…** → save one `.p12` with a password:
+```sh
+openssl base64 -A -in Certificates.p12 | pbcopy   # → APPLE_MAS_CERTIFICATE
+```
+
+**3. Provisioning profile.** In [Profiles](https://developer.apple.com/account/resources/profiles/list), create a **Mac App Store Connect** profile for your App ID and the distribution certificate, then download it:
+```sh
+openssl base64 -A -in Automau5.provisionprofile | pbcopy   # → APPLE_MAS_PROVISION_PROFILE
+```
+
+**4. Secrets and variables** (Settings → Secrets and variables → Actions):
+
+| Name | Kind | Value |
+|---|---|---|
+| `APPLE_MAS_CERTIFICATE` | secret | base64 `.p12` with both identities (step 2) |
+| `APPLE_MAS_CERTIFICATE_PASSWORD` | secret | its export password |
+| `APPLE_MAS_PROVISION_PROFILE` | secret | base64 provisioning profile (step 3) |
+| `APPLE_TEAM_ID` | variable | your 10-character Team ID (Membership details) |
+| `APPLE_APP_ID` | variable | the app's numeric Apple ID (step 1), only for uploads |
+| `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_P8` | secrets | App Store Connect API key, only for uploads. Same secrets as the [signed DMG](#signed-macos-builds-developer-id). The key needs at least the **Developer** role |
+
+The workflow checks these first and names any that are missing. It also fails if the provisioning profile doesn't match `APPLE_TEAM_ID` plus the bundle id. After building, it verifies the sandbox entitlement, the embedded profile, the build number and the package signature.
+
+`src-tauri/Entitlements.plist` is a template: CI replaces `TEAM_ID` and `BUNDLE_ID`. For a local App Store build, replace them by hand, put the profile at `src-tauri/embedded.provisionprofile` (gitignored), and use `--config src-tauri/tauri.appstore.conf.json`. See <https://v2.tauri.app/distribute/app-store/>.
+
+### Before submitting for review
+
+Test the TestFlight build on a Mac. This is the first build that runs inside the **App Sandbox**:
+- **Keep awake** uses IOKit power assertions, which are allowed in the sandbox and need no permission.
+- **Move/Click/Type** need **Accessibility** permission (System Settings → Privacy & Security → Accessibility). The app shows the system prompt the first time Start is pressed. Sandboxed apps can post input once allowed, but check it really works in the TestFlight build. If it doesn't, or App Review objects, you can ship with keep awake only.
 
 ## Microsoft Store
 

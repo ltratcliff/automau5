@@ -1,0 +1,232 @@
+name: Mac App Store
+
+# Builds a sandboxed, universal (Apple Silicon + Intel) app signed for the
+# Mac App Store and wraps it in a signed .pkg for App Store Connect.
+# App Store builds are not notarized; Apple reviews them instead.
+#
+# - Tag pushes (v*) build the .pkg as an artifact only.
+# - Manual runs (Actions tab > Run workflow) can also upload it to App Store
+#   Connect by ticking "upload".
+#
+# Repository secrets (setup steps in app/README.md, "Mac App Store"):
+#   APPLE_MAS_CERTIFICATE           base64 .p12 holding BOTH the app signing identity
+#                                   ("Apple Distribution" or "3rd Party Mac Developer
+#                                   Application") and the installer identity
+#                                   ("3rd Party Mac Developer Installer")
+#   APPLE_MAS_CERTIFICATE_PASSWORD  password for that .p12
+#   APPLE_MAS_PROVISION_PROFILE     base64 of the Mac App Store provisioning profile
+#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8
+#                                   App Store Connect API key (only needed to upload;
+#                                   shared with the signed DMG workflow)
+# Repository variables:
+#   APPLE_TEAM_ID                   10-character Team ID
+#   APPLE_APP_ID                    the app's numeric Apple ID in App Store Connect
+#                                   (App Information page; only needed to upload)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload the .pkg to App Store Connect
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+jobs:
+  pkg:
+    runs-on: macos-latest
+    env:
+      UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.upload }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      APPLE_APP_ID: ${{ vars.APPLE_APP_ID }}
+
+    steps:
+      - name: Check secrets and variables
+        env:
+          APPLE_MAS_CERTIFICATE: ${{ secrets.APPLE_MAS_CERTIFICATE }}
+          APPLE_MAS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_MAS_CERTIFICATE_PASSWORD }}
+          APPLE_MAS_PROVISION_PROFILE: ${{ secrets.APPLE_MAS_PROVISION_PROFILE }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          required="APPLE_MAS_CERTIFICATE APPLE_MAS_CERTIFICATE_PASSWORD APPLE_MAS_PROVISION_PROFILE APPLE_TEAM_ID"
+          [ "$UPLOAD" = "true" ] && required="$required APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8 APPLE_APP_ID"
+          missing=""
+          for name in $required; do [ -n "${!name}" ] || missing="$missing $name"; done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets/variables:$missing (see app/README.md, 'Mac App Store')"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Read app version and bundle id
+        run: |
+          VERSION=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+          BUNDLE_ID=$(node -p "require('./app/src-tauri/tauri.conf.json').identifier")
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match tauri.conf.json version $VERSION"
+            exit 1
+          fi
+          # CFBundleVersion must be unique per upload; the run number always increases.
+          BUILD_NUMBER="${{ github.run_number }}"
+          {
+            echo "VERSION=$VERSION"
+            echo "BUNDLE_ID=$BUNDLE_ID"
+            echo "BUILD_NUMBER=$BUILD_NUMBER"
+          } >> "$GITHUB_ENV"
+          echo "Version $VERSION ($BUILD_NUMBER), bundle id $BUNDLE_ID, team $APPLE_TEAM_ID"
+
+      - name: Import signing certificates
+        env:
+          APPLE_MAS_CERTIFICATE: ${{ secrets.APPLE_MAS_CERTIFICATE }}
+          APPLE_MAS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_MAS_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/mas.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "$APPLE_MAS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/mas.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/mas.p12" -k "$KEYCHAIN" -P "$APPLE_MAS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          existing=()
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            existing+=("${line//\"/}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$KEYCHAIN" "${existing[@]}"
+          rm "$RUNNER_TEMP/mas.p12"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+          # App signing identity (codesigning policy) and installer identity (any policy).
+          APP_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep -oE '"(Apple Distribution|3rd Party Mac Developer Application): [^"]*"' | head -1 | tr -d '"')
+          INSTALLER_IDENTITY=$(security find-identity -v "$KEYCHAIN" \
+            | grep -oE '"3rd Party Mac Developer Installer: [^"]*"' | head -1 | tr -d '"')
+          if [ -z "$APP_IDENTITY" ] || [ -z "$INSTALLER_IDENTITY" ]; then
+            echo "::error::APPLE_MAS_CERTIFICATE needs both an 'Apple Distribution' (or '3rd Party Mac Developer Application') and a '3rd Party Mac Developer Installer' identity. Found:"
+            security find-identity -v "$KEYCHAIN"
+            exit 1
+          fi
+          echo "App identity: $APP_IDENTITY"
+          echo "Installer identity: $INSTALLER_IDENTITY"
+          echo "APPLE_SIGNING_IDENTITY=$APP_IDENTITY" >> "$GITHUB_ENV"
+          echo "INSTALLER_IDENTITY=$INSTALLER_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Install provisioning profile and entitlements
+        env:
+          APPLE_MAS_PROVISION_PROFILE: ${{ secrets.APPLE_MAS_PROVISION_PROFILE }}
+        working-directory: app/src-tauri
+        run: |
+          echo "$APPLE_MAS_PROVISION_PROFILE" | base64 --decode > embedded.provisionprofile
+
+          # The profile must be for this team and bundle id.
+          security cms -D -i embedded.provisionprofile > "$RUNNER_TEMP/profile.plist"
+          PROFILE_APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$RUNNER_TEMP/profile.plist")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
+          echo "Profile '$PROFILE_NAME' is for $PROFILE_APP_ID"
+          if [ "$PROFILE_APP_ID" != "$APPLE_TEAM_ID.$BUNDLE_ID" ]; then
+            echo "::error::Provisioning profile is for $PROFILE_APP_ID, expected $APPLE_TEAM_ID.$BUNDLE_ID (APPLE_TEAM_ID + identifier in tauri.conf.json)"
+            exit 1
+          fi
+
+          sed -e "s/TEAM_ID/$APPLE_TEAM_ID/g" -e "s/BUNDLE_ID/$BUNDLE_ID/g" Entitlements.plist > "$RUNNER_TEMP/Entitlements.plist"
+          plutil -lint "$RUNNER_TEMP/Entitlements.plist"
+
+          # One config overlay: App Store settings + generated entitlements + build number.
+          node -e '
+            const fs = require("fs");
+            const cfg = JSON.parse(fs.readFileSync("tauri.appstore.conf.json", "utf8"));
+            cfg.bundle.macOS.entitlements = process.argv[1];
+            cfg.bundle.macOS.bundleVersion = process.argv[2];
+            // Absolute, so it does not matter which directory Tauri resolves from.
+            cfg.bundle.macOS.files["embedded.provisionprofile"] = process.argv[4];
+            fs.writeFileSync(process.argv[3], JSON.stringify(cfg, null, 2));
+          ' "$RUNNER_TEMP/Entitlements.plist" "$BUILD_NUMBER" "$RUNNER_TEMP/tauri.mas.conf.json" "$PWD/embedded.provisionprofile"
+          cat "$RUNNER_TEMP/tauri.mas.conf.json"
+
+      # Sign only. The App Store Connect API secrets are deliberately not
+      # exposed here, or tauri build would try to notarize.
+      - name: Build and sign app
+        working-directory: app
+        run: npm run tauri build -- --target universal-apple-darwin --bundles app --config "$RUNNER_TEMP/tauri.mas.conf.json"
+
+      - name: Build signed installer package
+        run: |
+          APP=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          [ -n "$APP" ] || { echo "::error::Build produced no .app"; exit 1; }
+          PKG="$RUNNER_TEMP/Automau5-${VERSION}-${BUILD_NUMBER}.pkg"
+          xcrun productbuild --sign "$INSTALLER_IDENTITY" --component "$APP" /Applications "$PKG"
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+          echo "PKG_PATH=$PKG" >> "$GITHUB_ENV"
+
+      - name: Verify app and package
+        run: |
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          ents=$(codesign -d --entitlements - --xml "$APP_PATH" 2>/dev/null)
+          echo "$ents" | grep -q 'com.apple.security.app-sandbox' \
+            || { echo "::error::App is not sandboxed"; exit 1; }
+          echo "$ents" | grep -q "$APPLE_TEAM_ID.$BUNDLE_ID" \
+            || { echo "::error::application-identifier entitlement missing or wrong"; exit 1; }
+          [ -f "$APP_PATH/Contents/embedded.provisionprofile" ] \
+            || { echo "::error::Provisioning profile not embedded"; exit 1; }
+          actual_build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")
+          [ "$actual_build" = "$BUILD_NUMBER" ] \
+            || { echo "::error::CFBundleVersion is $actual_build, expected $BUILD_NUMBER"; exit 1; }
+          pkgutil --check-signature "$PKG_PATH"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: automau5-mac-app-store-pkg
+          path: ${{ env.PKG_PATH }}
+          if-no-files-found: error
+
+      - name: Validate and upload to App Store Connect
+        if: env.UPLOAD == 'true'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          # altool finds the key as AuthKey_<id>.p8 in $API_PRIVATE_KEYS_DIR.
+          export API_PRIVATE_KEYS_DIR="$RUNNER_TEMP/private_keys"
+          mkdir -p "$API_PRIVATE_KEYS_DIR"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$API_PRIVATE_KEYS_DIR/AuthKey_${APPLE_API_KEY}.p8"
+          chmod 600 "$API_PRIVATE_KEYS_DIR/AuthKey_${APPLE_API_KEY}.p8"
+
+          xcrun altool --validate-app -f "$PKG_PATH" --type macos \
+            --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+          xcrun altool --upload-package "$PKG_PATH" --type macos \
+            --apple-id "$APPLE_APP_ID" \
+            --bundle-id "$BUNDLE_ID" \
+            --bundle-version "$BUILD_NUMBER" \
+            --bundle-short-version-string "$VERSION" \
+            --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+          echo "::notice::Uploaded $VERSION ($BUILD_NUMBER). It appears in App Store Connect > TestFlight after processing (usually 5-30 minutes)."
+
+      - name: Clean up
+        if: always()
+        run: |
+          [ -n "$KEYCHAIN" ] && security delete-keychain "$KEYCHAIN" || true
+          rm -rf "$RUNNER_TEMP/private_keys" app/src-tauri/embedded.provisionprofile
