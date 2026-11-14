@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Automau5 app icon: an original geometric "A" with round ears.
+       Render: rsvg-convert -w 1024 -h 1024 app-icon.svg -o app-icon.png -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b4cf0"/>
+      <stop offset="1" stop-color="#a03cdc"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a1f5c"/>
+      <stop offset="1" stop-color="#1b1438"/>
+    </linearGradient>
+    <clipPath id="ears">
+      <circle cx="372" cy="300" r="122"/>
+      <circle cx="652" cy="300" r="122"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background tile (macOS-style margin so it sits well next to other icons) -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+
+  <!-- Ears: dark discs tucked behind the top of the letter -->
+  <circle cx="372" cy="300" r="122" fill="url(#ear)"/>
+  <circle cx="652" cy="300" r="122" fill="url(#ear)"/>
+
+  <!-- The A: rounded strokes in front of the ears. A wider pass in the
+       background colour, clipped to the ears, separates the overlapping shapes. -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M318 790 L512 362 L706 790" stroke="#6a48ea" stroke-width="148" clip-path="url(#ears)"/>
+    <path d="M318 790 L512 362 L706 790" stroke="#ffffff" stroke-width="112"/>
+    <path d="M410 640 L614 640" stroke="#ffffff" stroke-width="92"/>
+  </g>
+</svg>
