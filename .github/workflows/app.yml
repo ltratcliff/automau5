@@ -59,5 +59,6 @@ jobs:
             target/**/release/bundle/**/*.msi
             target/**/release/bundle/**/*.exe
             target/**/release/bundle/**/*.deb
+            target/**/release/bundle/**/*.rpm
             target/**/release/bundle/**/*.AppImage
           if-no-files-found: warn
