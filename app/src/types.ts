@@ -3,7 +3,8 @@ export type Action = "move" | "click" | "type" | "keepAwake";
 
 export interface JobConfig {
   action: Action;
-  intervalSecs: number;
+  /** milliseconds, at least 50 */
+  intervalMs: number;
   /** null = run until stopped */
   count: number | null;
   keepDisplayOn?: boolean;
@@ -13,7 +14,7 @@ export interface JobConfig {
 }
 
 export type JobEvent =
-  | { kind: "started"; action: Action; intervalSecs: number; count: number | null }
+  | { kind: "started"; action: Action; intervalMs: number; count: number | null }
   | { kind: "performed"; iteration: number; count: number | null; detail: string }
   | { kind: "failed"; iteration: number; count: number | null; error: string }
   | { kind: "finished"; completed: number }

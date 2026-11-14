@@ -25,6 +25,9 @@ const MOVE_RANGE: i32 = 250;
 /// Default for [`JobConfig::hold_ms`]: long enough for games that poll input
 /// once per frame to notice the press.
 pub const DEFAULT_HOLD_MS: u64 = 100;
+/// Shortest allowed interval. Faster than this, Move/Click can make the
+/// computer hard to take back control of.
+pub const MIN_INTERVAL_MS: u64 = 50;
 const MAX_HOLD_MS: u64 = 10 * 60 * 1000;
 
 /// The kind of input to generate on every iteration.
@@ -69,9 +72,9 @@ impl fmt::Display for Action {
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct JobConfig {
     pub action: Action,
-    /// Seconds to wait before each action. For `KeepAwake` this is just how
-    /// often progress is reported.
-    pub interval_secs: u64,
+    /// Milliseconds to wait before each action (at least [`MIN_INTERVAL_MS`]).
+    /// For `KeepAwake` this is just how often progress is reported.
+    pub interval_ms: u64,
     /// Number of actions to perform, or `None` to run until stopped.
     pub count: Option<u32>,
     /// `KeepAwake` only: also keep the display from turning off.
@@ -93,8 +96,8 @@ fn default_hold_ms() -> u64 {
 
 impl JobConfig {
     pub fn validate(&self) -> Result<(), Error> {
-        if self.interval_secs == 0 {
-            return Err(Error::new("interval must be at least 1 second"));
+        if self.interval_ms < MIN_INTERVAL_MS {
+            return Err(Error::new(format!("interval must be at least {MIN_INTERVAL_MS} ms")));
         }
         if self.count == Some(0) {
             return Err(Error::new("count must be at least 1"));
@@ -111,7 +114,7 @@ impl JobConfig {
     /// How long the job runs, or `None` if it runs until stopped.
     pub fn total_duration(&self) -> Option<Duration> {
         self.count
-            .map(|count| Duration::from_secs(self.interval_secs.saturating_mul(u64::from(count))))
+            .map(|count| Duration::from_millis(self.interval_ms.saturating_mul(u64::from(count))))
     }
 }
 
@@ -125,7 +128,7 @@ impl JobConfig {
 pub enum Event {
     Started {
         action: Action,
-        interval_secs: u64,
+        interval_ms: u64,
         count: Option<u32>,
     },
     Performed {
@@ -288,11 +291,11 @@ pub fn run_job(
 
     on_event(Event::Started {
         action: config.action,
-        interval_secs: config.interval_secs,
+        interval_ms: config.interval_ms,
         count: config.count,
     });
 
-    let interval = Duration::from_secs(config.interval_secs);
+    let interval = Duration::from_millis(config.interval_ms);
     let hold = Duration::from_millis(config.hold_ms);
     let mut rng = fastrand::Rng::new();
     let mut completed: u32 = 0;
@@ -357,7 +360,7 @@ mod tests {
     fn config(count: u32) -> JobConfig {
         JobConfig {
             action: Action::Click,
-            interval_secs: 1,
+            interval_ms: 1000,
             count: Some(count),
             keep_display_on: false,
             keys: Vec::new(),
@@ -504,7 +507,7 @@ mod tests {
     #[test]
     fn config_json_shape() {
         let cfg: JobConfig =
-            serde_json::from_str(r#"{"action":"keepAwake","intervalSecs":60,"count":null}"#).unwrap();
+            serde_json::from_str(r#"{"action":"keepAwake","intervalMs":60000,"count":null}"#).unwrap();
         assert_eq!(cfg.action, Action::KeepAwake);
         assert_eq!(cfg.count, None);
         assert!(!cfg.keep_display_on);
@@ -513,7 +516,9 @@ mod tests {
     #[test]
     fn validation() {
         assert!(config(0).validate().is_err());
-        assert!(JobConfig { interval_secs: 0, ..config(1) }.validate().is_err());
+        assert!(JobConfig { interval_ms: 0, ..config(1) }.validate().is_err());
+        assert!(JobConfig { interval_ms: MIN_INTERVAL_MS - 1, ..config(1) }.validate().is_err());
+        assert!(JobConfig { interval_ms: MIN_INTERVAL_MS, ..config(1) }.validate().is_ok());
         assert!(config(1).validate().is_ok());
     }
 

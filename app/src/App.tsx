@@ -2,7 +2,7 @@ import { type ReactNode, useCallback, useEffect, useReducer, useState } from "re
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Action, JobConfig, JobEvent } from "./types";
-import KeyPicker, { formatCombo, isHoldValid, type TypeMode } from "./KeyPicker";
+import KeyPicker, { STOP_HOTKEY, formatCombo, isHoldValid, type TypeMode } from "./KeyPicker";
 
 const ACTIONS: { id: Action; label: string; hint: string; icon: ReactNode }[] = [
   {
@@ -55,13 +55,16 @@ const VERB: Record<Action, string> = { move: "move", click: "click", type: "keyp
 const SETTINGS_KEY = "automau5.settings";
 const MAX_LOG = 100;
 /** How often a keep-awake job reports progress. */
-const AWAKE_TICK_SECS = 60;
+const AWAKE_TICK_MS = 60_000;
+/** Must match MIN_INTERVAL_MS in src/lib.rs. */
+const MIN_INTERVAL_MS = 50;
+const UNIT_MS = { ms: 1, sec: 1000, min: 60_000 } as const;
 
 interface Settings {
   action: Action;
   // Move / click / type
   interval: number;
-  unit: "sec" | "min";
+  unit: keyof typeof UNIT_MS;
   count: number;
   forever: boolean;
   // Type
@@ -107,7 +110,7 @@ function toConfig(s: Settings): JobConfig {
   if (s.action === "keepAwake") {
     return {
       action: s.action,
-      intervalSecs: AWAKE_TICK_SECS,
+      intervalMs: AWAKE_TICK_MS,
       count: s.awakeForever ? null : Math.round(s.awakeFor * (s.awakeUnit === "hour" ? 60 : 1)),
       keepDisplayOn: s.keepDisplayOn,
     };
@@ -115,14 +118,17 @@ function toConfig(s: Settings): JobConfig {
   const useKeys = s.action === "type" && s.typeMode === "keys";
   return {
     action: s.action,
-    intervalSecs: Math.round(s.interval * (s.unit === "min" ? 60 : 1)),
+    intervalMs: Math.round(s.interval * UNIT_MS[s.unit]),
     count: s.forever ? null : s.count,
     ...(useKeys && { keys: s.keys, holdMs: s.holdMs }),
   };
 }
 
 function validationError(s: Settings, c: JobConfig): string | null {
-  if (c.intervalSecs < 1 || (c.count !== null && !(Number.isInteger(c.count) && c.count >= 1))) {
+  if (!(c.intervalMs >= MIN_INTERVAL_MS)) {
+    return `Interval must be at least ${MIN_INTERVAL_MS} ms.`;
+  }
+  if (c.count !== null && !(Number.isInteger(c.count) && c.count >= 1)) {
     return "Values must be at least 1.";
   }
   if (s.action === "type" && s.typeMode === "keys") {
@@ -147,6 +153,8 @@ interface JobState {
   nextAt: number | null;
   log: LogEntry[];
   error: string | null;
+  /** Stop hotkey: unknown until reported, then active or why it isn't. */
+  hotkey: { active: true } | { active: false; error: string } | null;
 }
 
 type Msg =
@@ -155,7 +163,8 @@ type Msg =
   | { type: "startFailed"; error: string }
   | { type: "stop" }
   | { type: "restore"; config: JobConfig }
-  | { type: "dismiss" };
+  | { type: "dismiss" }
+  | { type: "hotkey"; error: string | null };
 
 let logId = 0;
 function addLog(log: LogEntry[], text: string, error = false): LogEntry[] {
@@ -164,7 +173,7 @@ function addLog(log: LogEntry[], text: string, error = false): LogEntry[] {
 
 function startedText(c: JobConfig): string {
   if (c.action === "keepAwake") {
-    const span = c.count === null ? "until stopped" : `for ${formatDuration(c.count * c.intervalSecs)}`;
+    const span = c.count === null ? "until stopped" : `for ${formatDuration((c.count * c.intervalMs) / 1000)}`;
     return `Keeping awake ${span}${c.keepDisplayOn ? " (display on)" : ""}`;
   }
   const what = c.keys?.length
@@ -172,7 +181,7 @@ function startedText(c: JobConfig): string {
       ? formatCombo(c.keys[0])
       : `one of ${c.keys.map(formatCombo).join(", ")}`
     : c.action;
-  return `Started: ${c.count ?? "∞"} × ${what} every ${formatDuration(c.intervalSecs)}`;
+  return `Started: ${c.count ?? "∞"} × ${what} every ${formatInterval(c.intervalMs)}`;
 }
 
 function progressText(iteration: number, count: number | null): string {
@@ -184,24 +193,26 @@ function reducer(s: JobState, m: Msg): JobState {
   switch (m.type) {
     case "start":
       // Remember the full config: events don't carry keepDisplayOn.
-      return { ...s, status: "starting", config: m.config, error: null };
+      return { ...s, status: "starting", config: m.config, error: null, hotkey: null };
     case "startFailed":
       return { ...s, status: "idle", error: m.error };
     case "stop":
       return { ...s, status: "stopping" };
     case "dismiss":
       return { ...s, error: null };
+    case "hotkey":
+      return { ...s, hotkey: m.error === null ? { active: true } : { active: false, error: m.error } };
     case "restore":
-      return { ...s, status: "running", config: m.config, startedAt: null, nextAt: null };
+      return { ...s, status: "running", config: m.config, startedAt: null, nextAt: null, hotkey: null };
     case "event": {
       const e = m.event;
-      const intervalMs = (s.config?.intervalSecs ?? 0) * 1000;
+      const intervalMs = s.config?.intervalMs ?? 0;
       switch (e.kind) {
         case "started": {
           const config: JobConfig = {
             ...s.config,
             action: e.action,
-            intervalSecs: e.intervalSecs,
+            intervalMs: e.intervalMs,
             count: e.count,
           };
           return {
@@ -210,7 +221,7 @@ function reducer(s: JobState, m: Msg): JobState {
             config,
             done: 0,
             startedAt: now,
-            nextAt: now + e.intervalSecs * 1000,
+            nextAt: now + e.intervalMs,
             log: addLog(s.log, startedText(config)),
           };
         }
@@ -252,6 +263,13 @@ function reducer(s: JobState, m: Msg): JobState {
   }
 }
 
+/** "250 ms", "1.5 s", "2 min" */
+function formatInterval(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000 && ms % 1000 !== 0) return `${(ms / 1000).toFixed(1)} s`;
+  return formatDuration(ms / 1000);
+}
+
 function formatDuration(totalSecs: number): string {
   const s = Math.max(0, Math.round(totalSecs));
   const h = Math.floor(s / 3600);
@@ -286,6 +304,7 @@ export default function App() {
     nextAt: null,
     log: [],
     error: null,
+    hotkey: null,
   });
   const [now, setNow] = useState(Date.now());
 
@@ -305,11 +324,10 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    listen<JobEvent>("job-event", (e) => dispatch({ type: "event", event: e.payload })).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
+    const unlisteners: (() => void)[] = [];
+    const keep = (fn: () => void) => (cancelled ? fn() : unlisteners.push(fn));
+    listen<JobEvent>("job-event", (e) => dispatch({ type: "event", event: e.payload })).then(keep);
+    listen<string | null>("stop-hotkey", (e) => dispatch({ type: "hotkey", error: e.payload })).then(keep);
     invoke<JobConfig | null>("job_status").then((config) => {
       if (!cancelled && config) {
         dispatch({ type: "restore", config });
@@ -318,7 +336,7 @@ export default function App() {
     });
     return () => {
       cancelled = true;
-      unlisten?.();
+      unlisteners.forEach((fn) => fn());
     };
   }, []);
 
@@ -351,10 +369,10 @@ export default function App() {
   const remainingSecs =
     running && running.count !== null
       ? job.nextAt
-        ? (job.nextAt - now) / 1000 + (running.count - job.done - 1) * running.intervalSecs
-        : (running.count - job.done) * running.intervalSecs
+        ? (job.nextAt - now) / 1000 + ((running.count - job.done - 1) * running.intervalMs) / 1000
+        : ((running.count - job.done) * running.intervalMs) / 1000
       : null;
-  const draftTotal = draft.count === null ? null : draft.count * draft.intervalSecs;
+  const draftTotal = draft.count === null ? null : (draft.count * draft.intervalMs) / 1000;
 
   let summary: ReactNode;
   if (!valid) {
@@ -380,7 +398,13 @@ export default function App() {
             : "";
     } else {
       statusLeft = running.count === null ? `${job.done} done` : `${job.done} of ${running.count}`;
-      statusRight = job.nextAt ? `Next ${VERB[running.action]} in ${formatClock(job.nextAt - now)}` : "";
+      // Below a second a countdown just flickers; show the rate instead.
+      statusRight =
+        running.intervalMs < 1000
+          ? `${Math.round(1000 / running.intervalMs)} per second`
+          : job.nextAt
+            ? `Next ${VERB[running.action]} in ${formatClock(job.nextAt - now)}`
+            : "";
     }
     if (job.status === "starting") statusRight = "Starting…";
     if (job.status === "stopping") statusRight = "Stopping…";
@@ -500,6 +524,7 @@ export default function App() {
                     disabled={busy}
                     onChange={(e) => update("unit", e.target.value as Settings["unit"])}
                   >
+                    <option value="ms">milliseconds</option>
                     <option value="sec">seconds</option>
                     <option value="min">minutes</option>
                   </select>
@@ -565,6 +590,16 @@ export default function App() {
               <div />
             </div>
           )}
+          {job.hotkey &&
+            (job.hotkey.active ? (
+              <p className="hotkey-hint">
+                Press <kbd>{formatCombo(STOP_HOTKEY)}</kbd> anywhere to stop
+              </p>
+            ) : (
+              <p className="hotkey-hint unavailable" title={job.hotkey.error}>
+                Stop hotkey unavailable. Use the Stop button.
+              </p>
+            ))}
         </section>
       )}
 

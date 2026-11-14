@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 // names joined with "+", e.g. "ctrl+shift+a".
 
 const MODIFIERS = ["ctrl", "alt", "shift", "meta"];
+/** The app's global stop hotkey (STOP_HOTKEY_COMBO in src-tauri/src/main.rs). */
+export const STOP_HOTKEY = "shift+escape";
 const MAX_COMBOS = 10;
 const MAX_HOLD_MS = 600_000;
 const isMac = navigator.userAgent.includes("Mac");
@@ -102,7 +104,8 @@ interface Props {
 
 export default function KeyPicker({ mode, keys, holdMs, disabled, onChange }: Props) {
   const [recording, setRecording] = useState(false);
-  const [unsupported, setUnsupported] = useState<string | null>(null);
+  /** Why the last recorded key was rejected, if it was. */
+  const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
     if (disabled) setRecording(false);
@@ -117,6 +120,10 @@ export default function KeyPicker({ mode, keys, holdMs, disabled, onChange }: Pr
 
     const commit = (combo: string) => {
       setRecording(false);
+      if (combo === STOP_HOTKEY) {
+        setProblem(`${formatCombo(STOP_HOTKEY)} is reserved as the stop hotkey. Pick another key.`);
+        return;
+      }
       if (!keys.includes(combo) && keys.length < MAX_COMBOS) onChange({ keys: [...keys, combo] });
     };
     const onDown = (e: KeyboardEvent) => {
@@ -125,10 +132,11 @@ export default function KeyPicker({ mode, keys, holdMs, disabled, onChange }: Pr
       if (e.repeat) return;
       const name = codeToName(e.code);
       if (!name) {
-        setUnsupported(e.key && e.key !== "Unidentified" ? e.key : e.code);
+        const label = e.key && e.key !== "Unidentified" ? e.key : e.code;
+        setProblem(`"${label}" isn't supported. Try a letter, number, F1–F20, arrow, or modifier combo.`);
         return;
       }
-      setUnsupported(null);
+      setProblem(null);
       if (MODIFIERS.includes(name)) held.add(name);
       else commit([...heldMods(), name].join("+"));
     };
@@ -189,7 +197,7 @@ export default function KeyPicker({ mode, keys, holdMs, disabled, onChange }: Pr
                 className={recording ? "chip add recording" : "chip add"}
                 disabled={disabled}
                 onClick={() => {
-                  setUnsupported(null);
+                  setProblem(null);
                   setRecording((r) => !r);
                 }}
               >
@@ -198,8 +206,8 @@ export default function KeyPicker({ mode, keys, holdMs, disabled, onChange }: Pr
             )}
           </div>
           <p className="note">
-            {unsupported
-              ? `"${unsupported}" isn't supported. Try a letter, number, F1–F20, arrow, or modifier combo.`
+            {problem
+              ? problem
               : recording
                 ? "Click again to cancel."
                 : keys.length > 1

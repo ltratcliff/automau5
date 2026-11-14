@@ -20,8 +20,12 @@ struct Args {
     action: Action,
 
     /// Number of seconds between moving or clicking
-    #[arg(short, long, default_value_t = 60)]
+    #[arg(short, long, default_value_t = 60, conflicts_with = "interval_ms")]
     interval: u64,
+
+    /// Interval in milliseconds instead of seconds (minimum 50)
+    #[arg(long, value_name = "MS")]
+    interval_ms: Option<u64>,
 
     /// Number of iterations to run program
     #[arg(short, long, default_value_t = 60, conflicts_with = "forever")]
@@ -45,6 +49,15 @@ struct Args {
     hold: u64,
 }
 
+/// "250 ms", "1.5s", "60s"
+fn format_interval(ms: u64) -> String {
+    match ms {
+        ms if ms < 1000 => format!("{ms} ms"),
+        ms if ms % 1000 == 0 => format!("{}s", ms / 1000),
+        ms => format!("{:.1}s", ms as f64 / 1000.0),
+    }
+}
+
 /// Prints `[h:mm:ss] message`, timed from the start of the run.
 fn log(start: Instant, msg: impl std::fmt::Display) {
     let s = start.elapsed().as_secs();
@@ -57,7 +70,7 @@ fn main() -> ExitCode {
 
     let config = JobConfig {
         action: args.action,
-        interval_secs: args.interval,
+        interval_ms: args.interval_ms.unwrap_or(args.interval.saturating_mul(1000)),
         count: (!args.forever).then_some(args.count),
         keep_display_on: args.display,
         keys: args.keys,
@@ -85,16 +98,20 @@ fn main() -> ExitCode {
         Some(total) => log(
             start,
             format_args!(
-                "Running '{}' every {}s, {} times ({:.2} hours)",
+                "Running '{}' every {}, {} times ({:.2} hours)",
                 config.action,
-                config.interval_secs,
+                format_interval(config.interval_ms),
                 config.count.unwrap_or_default(),
                 total.as_secs_f32() / 3600.
             ),
         ),
         None => log(
             start,
-            format_args!("Running '{}' every {}s until Ctrl-C", config.action, config.interval_secs),
+            format_args!(
+                "Running '{}' every {} until Ctrl-C",
+                config.action,
+                format_interval(config.interval_ms)
+            ),
         ),
     }
 
