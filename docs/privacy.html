@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Automau5 Privacy Policy</title>
+  <meta name="description" content="Automau5 does not collect, transmit, or share any personal data.">
+  <style>
+    :root {
+      --bg: #f6f6f8;
+      --surface: #ffffff;
+      --border: #e2e2ea;
+      --text: #1b1b24;
+      --muted: #5f5f70;
+      --accent: #5b4cf0;
+      color-scheme: light dark;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #15151b;
+        --surface: #1f1f28;
+        --border: #2e2e3a;
+        --text: #ececf1;
+        --muted: #a2a2b3;
+        --accent: #9a90ff;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 16px 64px;
+    }
+    header { margin-bottom: 32px; }
+    h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.02em; }
+    .meta { color: var(--muted); margin: 0; }
+    .summary {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin: 0 0 32px;
+    }
+    .summary p { margin: 0; }
+    h2 { font-size: 1.2rem; margin: 36px 0 8px; }
+    p, ul { margin: 0 0 14px; }
+    ul { padding-left: 1.3em; }
+    li { margin-bottom: 6px; }
+    a { color: var(--accent); }
+    code {
+      font: 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    footer { margin-top: 48px; color: var(--muted); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Automau5 Privacy Policy</h1>
+      <p class="meta">Effective November 14, 2026</p>
+    </header>
+
+    <div class="summary">
+      <p><strong>Automau5 does not collect, transmit, or share any personal data.</strong> It has no accounts, analytics, advertising, or crash reporting, and it makes no network connections.</p>
+    </div>
+
+    <p>This policy covers the Automau5 desktop app and the <code>am</code> command-line tool on Windows, macOS, and Linux, including versions distributed through the Microsoft Store and the Mac App Store.</p>
+
+    <h2>What the app does</h2>
+    <p>Automau5 runs entirely on your device. Depending on the mode you choose, it moves the mouse pointer, clicks, presses keys you've chosen, or asks the operating system not to go to sleep, at an interval you set.</p>
+
+    <h2>Information stored on your device</h2>
+    <p>The desktop app saves your settings locally so they're remembered next time: the selected mode, interval, repeat count, keep-awake options, and any key combinations you've recorded. This data stays on your device and is never sent anywhere. Uninstalling a Store version removes it; with other installers it may remain in your user profile's app data folder until you delete it.</p>
+    <p>The activity list shown in the app is kept in memory only and is cleared when the app closes.</p>
+
+    <h2>Keyboard and input</h2>
+    <p>Automau5 does not monitor or log what you type. It reads a key press only while you're recording a key combination, after clicking <em>Record key</em>, and saves only the name of that key (for example, <code>ctrl+shift+a</code>).</p>
+    <p>Keys and clicks that Automau5 generates go to whichever window is in focus, just as if you'd pressed them yourself.</p>
+
+    <h2>System permissions</h2>
+    <ul>
+      <li><strong>macOS Accessibility:</strong> required for the Move, Click, and Type modes, because macOS only lets approved apps generate mouse and keyboard input. Automau5 uses this permission solely to generate the input you configure, never to read the contents of other apps.</li>
+      <li><strong>Keep awake:</strong> uses the operating system's standard power-management features and needs no special permission.</li>
+    </ul>
+
+    <h2>Network access</h2>
+    <p>Automau5 does not connect to the internet. It contains no code that sends data off your device, and the desktop app's security policy blocks network requests.</p>
+
+    <h2>Third parties</h2>
+    <p>Automau5 does not share data with anyone, because it doesn't collect any. App stores and your operating system may collect information under their own policies, for example download statistics or crash data collected by Microsoft or Apple. That collection isn't controlled by Automau5. See the <a href="https://privacy.microsoft.com/privacystatement">Microsoft Privacy Statement</a> and <a href="https://www.apple.com/legal/privacy/">Apple's Privacy Policy</a>.</p>
+
+    <h2>Children</h2>
+    <p>Automau5 collects no data from anyone, including children.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>If this policy changes, the updated version will be posted on this page with a new effective date. Significant changes will also be noted in the app's release notes.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about this policy can be raised on the project's <a href="https://github.com/ltratcliff/automau5/issues">GitHub issues page</a>.</p>
+
+    <footer>Automau5 is open source under the MIT License.</footer>
+  </main>
+</body>
+</html>
